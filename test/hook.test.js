@@ -1,0 +1,22 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { JSDOM } = require('jsdom');
+const { installNotificationHook } = require('../src/page-hook');
+test('notification shim captures text, supports permission callbacks, and installs once', async () => {
+  const dom = new JSDOM('', { url: 'https://messages.google.com/web/conversations', runScripts: 'outside-only' });
+  const received = [];
+  dom.window.postMessage = payload => received.push(payload);
+  dom.window.eval(`(${installNotificationHook.toString()})()`);
+  const Notification = dom.window.Notification;
+  assert.equal(Notification.permission, 'granted');
+  let permission;
+  assert.equal(await Notification.requestPermission(value => { permission = value; }), 'granted');
+  assert.equal(permission, 'granted');
+  const notification = new Notification('Bank', { body: 'Your code is 123456', tag: '1' });
+  assert.deepEqual(JSON.parse(JSON.stringify(received)), [{ type: 'messages-tray-notification', title: 'Bank', body: 'Your code is 123456', tag: '1' }]);
+  notification.close();
+  dom.window.eval(`(${installNotificationHook.toString()})()`);
+  assert.equal(dom.window.Notification, Notification);
+  dom.window.close();
+});

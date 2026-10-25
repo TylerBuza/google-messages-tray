@@ -1,0 +1,14 @@
+node_modules/
+dist/
+dist-v*/
+*.log
+release/
+.env
+.env.*
+!.env.example
+.openchamber/
+chrome-profile/
+settings.json
+messages-tray-*-smoke.json
+Thumbs.db
+.DS_Store

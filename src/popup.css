@@ -1,0 +1,11 @@
+:root { color-scheme: dark; font-family: 'Segoe UI', sans-serif; font-size: 14px; }
+* { box-sizing: border-box; } body { margin: 0; background: #151b28; color: #eff4ff; border: 1px solid #37445d; border-radius: 12px; overflow: hidden; }
+#card { padding: 14px 16px; } header { display: flex; align-items: center; justify-content: space-between; }
+.brand { color: #9aaac8; font-size: 10px; letter-spacing: 1.5px; font-weight: 700; }
+button { font: inherit; color: inherit; border: 0; cursor: pointer; border-radius: 7px; background: #2b364c; padding: 9px 12px; }
+button:hover { filter: brightness(1.2); } button:focus-visible { outline: 2px solid #8db6ff; outline-offset: 2px; }
+#dismiss { background: transparent; font-size: 21px; padding: 0 5px; color: #b7c3db; }
+#message { display: block; text-align: left; background: none; padding: 8px 0 12px; width: 100%; }
+#sender { display: block; font-size: 16px; margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#body { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.45; color: #c9d4e9; overflow-wrap: anywhere; }
+footer { display: flex; gap: 8px; } #copy { background: #a9c8ff; color: #101c31; font-weight: 650; } [hidden] { display: none !important; }

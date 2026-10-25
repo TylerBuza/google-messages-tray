@@ -1,0 +1,33 @@
+{
+  "name": "messages-tray",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Unofficial Google Messages tray app for Windows with desktop notifications and one-click SMS verification code copying.",
+  "author": { "name": "Tyler Buza", "url": "https://github.com/TylerBuza" },
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/TylerBuza/google-messages-tray.git" },
+  "homepage": "https://github.com/TylerBuza/google-messages-tray#readme",
+  "bugs": { "url": "https://github.com/TylerBuza/google-messages-tray/issues" },
+  "keywords": ["google-messages", "windows", "system-tray", "sms", "otp", "2fa", "desktop-notifications", "verification-code"],
+  "main": "src/main.js",
+  "dependencies": { "puppeteer-core": "^25.16.0" },
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "demo": "electron scripts/capture-demo.js",
+    "build": "electron-builder --win portable --x64"
+  },
+  "devDependencies": {
+    "electron": "^42.0.0",
+    "electron-builder": "^26.0.12",
+    "jsdom": "^26.1.0"
+  },
+  "build": {
+    "appId": "local.messages.tray",
+    "productName": "Messages Tray",
+    "directories": { "output": "release" },
+    "files": ["src/**/*", "assets/**/*", "README.md", "LICENSE", "PRIVACY.md", "package.json"],
+    "win": { "target": "portable", "icon": "assets/icon.ico", "signExecutable": false },
+    "portable": { "artifactName": "Messages-Tray-${version}.exe" }
+  }
+}
