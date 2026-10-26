@@ -4,6 +4,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { extractCode, MessageGate } = require('./codes');
 const { ChromeHost } = require('./chrome-host');
+const { addUnreadBadge } = require('./tray-badge');
 
 const HOME = 'https://messages.google.com/web/conversations';
 const smokeTest = process.argv.includes('--smoke-test');
@@ -18,6 +19,8 @@ if (!ownLock) app.quit();
 
 let host, starting, tray, quitting = false, paused = false, locked = false;
 let lastCode = null;
+let unreadCount = null;
+const trayImages = new Map();
 const gate = new MessageGate();
 const popups = new Map();
 async function showMessages() {
@@ -41,9 +44,9 @@ function receiveMessage(payload) {
 async function startChrome() {
   if (starting) return starting;
   host = new ChromeHost({ profile: path.join(app.getPath('userData'), 'chrome-profile'), url: HOME, offline: smokeTest,
-    onMessage: receiveMessage,
-    onDisconnect: () => { if (tray) tray.setToolTip('Messages Tray — Chrome closed; double-click to reopen'); },
-    onError: () => { if (tray) tray.setToolTip('Messages Tray — page failed to load; open Messages to retry'); } });
+    onMessage: receiveMessage, onUnread: setUnreadCount,
+    onDisconnect: () => { setUnreadCount(null); if (tray) tray.setToolTip('Messages Tray — Chrome closed; double-click to reopen'); },
+    onError: () => { setUnreadCount(null); if (tray) tray.setToolTip('Messages Tray — page failed to load; open Messages to retry'); } });
   starting = host.start();
   try { await starting; } finally { starting = null; }
 }
@@ -54,12 +57,22 @@ async function finishSmoke(code, message) {
   fs.writeFileSync(path.join(reportDirectory, 'smoke-report.json'), JSON.stringify({ passed: code === 0, message }));
   quitting = true; await host?.stop(); app.exit(code);
 }
-function makeTrayIcon() {
-  return nativeImage.createFromPath(path.join(__dirname, '../assets/icon.png')).resize({ width: 32, height: 32 });
+function makeTrayIcon(unread = false) {
+  if (trayImages.has(unread)) return trayImages.get(unread);
+  const base = nativeImage.createFromPath(path.join(__dirname, '../assets/icon.png')).resize({ width: 32, height: 32 });
+  const image = unread ? nativeImage.createFromBitmap(addUnreadBadge(base.toBitmap(), 32, 32), { width: 32, height: 32 }) : base;
+  trayImages.set(unread, image);
+  return image;
+}
+function setUnreadCount(count) {
+  if (count === unreadCount) return;
+  unreadCount = count;
+  if (tray) { tray.setImage(makeTrayIcon(count > 0)); updateMenu(); }
 }
 function updateMenu() {
   if (!tray) return;
-  tray.setToolTip(paused ? 'Messages Tray — notifications paused' : 'Messages Tray — running');
+  const status = [unreadCount > 0 ? 'unread messages' : 'running', ...(paused ? ['notifications paused'] : [])];
+  tray.setToolTip(`Messages Tray — ${status.join(' · ')}`);
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open Google Messages / pair phone', click: showMessages },
     { label: 'Hide Messages window', click: hideMessages },
@@ -109,6 +122,10 @@ function showPopup(data) {
           await starting;
           const realChrome = await host.page.evaluate('({webdriver: navigator.webdriver, ua: navigator.userAgent})');
           if (realChrome.webdriver || /Electron/.test(realChrome.ua)) throw new Error('Expected regular Chrome without WebDriver mode');
+          if (unreadCount !== 1) throw new Error('Initial unread conversation did not enable the tray badge');
+          await host.page.evaluate(() => document.querySelector('[data-e2e-is-unread]').setAttribute('data-e2e-is-unread', 'false'));
+          await new Promise(resolve => setTimeout(resolve, 750));
+          if (unreadCount !== 0) throw new Error('Marking the conversation read did not clear the tray badge');
           await host.hide();
           const hidden = await host.status();
           if (!hidden.count || hidden.visible !== 0) throw new Error('Chrome window failed to hide');
@@ -121,7 +138,7 @@ function showPopup(data) {
           await host.hide();
           const hideButton = await host.page.$('#__messagesTrayHide');
           if (!hideButton) throw new Error('Hide to tray button missing');
-          await finishSmoke(0, 'SMOKE PASS: Chrome notification → Copy 123456 popup; native X hit-test and mouse callback hide Chrome without closing it; show-from-tray restores it.');
+          await finishSmoke(0, 'SMOKE PASS: Chrome notification → Copy popup; unread flag enables and clears tray badge; X hides without closing; tray restores Chrome.');
         } catch (error) { await finishSmoke(1, 'SMOKE FAIL: ' + error.message); }
       }, 800);
     }

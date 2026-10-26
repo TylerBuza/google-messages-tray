@@ -22,6 +22,7 @@ Never commit actual texts, OTPs, Chrome profiles, pairing codes, `.env` files, l
 - `src/page-hook.js`: page-world notification capture.
 - `src/watcher.js`: conservative unread-list fallback; initial contents are baselined.
 - `src/codes.js`: numeric verification-code heuristics and short deduplication gate.
+- `src/tray-badge.js`: local bitmap compositing for the unread red-dot tray badge.
 - `src/window-helper.ps1`: native Windows window visibility and process-scoped X mouse-click handling.
 - `src/popup.*`: sandboxed local notification UI. Render remote values using `textContent`, never HTML.
 

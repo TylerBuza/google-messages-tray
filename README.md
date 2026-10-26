@@ -21,6 +21,7 @@
 - **No regular Chrome tab.** Messages runs in a separate Chrome app window that hides completely to the tray.
 - **Copy verification codes.** Detected numeric OTP / 2FA codes get a one-click **Copy** button.
 - **Click X, keep receiving.** The app's close button hides the window instead of shutting down Messages.
+- **Unread tray badge.** A small red dot marks observed unread conversations, even with popups paused. Reading them clears it; simply opening the window does not.
 - **Open only when you need it.** Double-click the tray icon to read or reply in Google's familiar web interface.
 - **Portable Windows app.** No browser extension, administrator access, or installer required. Starting with Windows is optional.
 - **Local companion, open source.** No app analytics, message-forwarding service, or subscription. Google Messages itself still connects to Google.
@@ -71,6 +72,7 @@ There is no subscription, extension, or app backend. There **is** an Electron + 
 - An active, visible conversation can suppress Google's notifications. Hide the window for background use, and keep notifications enabled in Google's Messages settings.
 - Locking Windows suppresses companion popups and clears the in-memory last-code shortcut. Suppressed texts are not replayed after unlock. Other site permissions are denied for the Messages origin.
 - Subsequent launches start minimized, then hide; a brief taskbar flash is possible. The tray indicates that the app is running, not that your phone is connected.
+- The unread badge reflects conversation flags observed in Google's list, not a guaranteed account-wide count. Previously observed rows are remembered when scrolled offscreen; older unseen chats or deletion/read changes outside the rendered list may require reopening the relevant list area or reloading Messages. No texts are marked read automatically.
 - The release is unsigned and currently Windows x64 only. Google sign-in/phone pairing and real incoming SMS require a live user test; automated tests use synthetic messages.
 
 Need help? See [troubleshooting](docs/TROUBLESHOOTING.md) or [report a bug](https://github.com/TylerBuza/google-messages-tray/issues/new/choose). **Never attach real verification codes, texts, pairing QR codes, cookies, or browser profiles.**

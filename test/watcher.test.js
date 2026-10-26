@@ -3,6 +3,43 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { JSDOM } = require('jsdom');
 const { createWatcher } = require('../src/watcher');
+test('reports existing unread conversations immediately, without sending old-message popups', () => {
+  const { document } = new JSDOM('<mws-conversations-list><mws-conversation-list-item><a href="/web/conversations/1" data-e2e-is-unread="true"><span class="snippet-text">Old text</span></a></mws-conversation-list-item></mws-conversations-list>').window;
+  const counts = [], messages = [];
+  const watcher = createWatcher(document, message => messages.push(message), count => counts.push(count));
+  watcher.scan(); watcher.scan();
+  assert.deepEqual(counts, [1]); assert.equal(messages.length, 0);
+  document.querySelector('a').setAttribute('data-e2e-is-unread', 'false');
+  watcher.scan();
+  assert.deepEqual(counts, [1, 0]);
+});
+test('tracks unread state even when a preview is absent, and explicit false overrides stale CSS', () => {
+  const { document } = new JSDOM('<mws-conversation-list-item class="unread"><a href="/web/conversations/1" data-e2e-is-unread="false"></a></mws-conversation-list-item>').window;
+  const counts = [];
+  const watcher = createWatcher(document, () => {}, count => counts.push(count));
+  watcher.scan();
+  document.querySelector('a').setAttribute('data-e2e-is-unread', 'true'); watcher.scan();
+  assert.deepEqual(counts, [0, 1]);
+});
+test('retains known unread state across list virtualization and clears it when the row is read', () => {
+  const { document } = new JSDOM('<mws-conversations-list><mws-conversation-list-item><a href="/web/conversations/1" data-e2e-is-unread="true"></a></mws-conversation-list-item><mws-conversation-list-item><a href="/web/conversations/2" data-e2e-is-unread="false"></a></mws-conversation-list-item></mws-conversations-list>').window;
+  const counts = [];
+  const watcher = createWatcher(document, () => {}, count => counts.push(count));
+  watcher.scan();
+  const unread = document.querySelector('mws-conversation-list-item'); unread.remove(); watcher.scan();
+  assert.deepEqual(counts, [1]);
+  unread.querySelector('a').setAttribute('data-e2e-is-unread', 'false');
+  document.querySelector('mws-conversations-list').appendChild(unread); watcher.scan();
+  assert.deepEqual(counts, [1, 0]);
+});
+test('distinguishes an unavailable inbox from a loaded empty inbox', () => {
+  const { document } = new JSDOM('<main></main>').window;
+  const counts = [];
+  const watcher = createWatcher(document, () => {}, count => counts.push(count));
+  watcher.scan(); assert.deepEqual(counts, [null]);
+  document.querySelector('main').innerHTML = '<mws-conversations-list></mws-conversations-list>';
+  watcher.scan(); assert.deepEqual(counts, [null, 0]);
+});
 test('baselines old unread messages and notifies new unread text without opening chats', () => {
   const dom = new JSDOM('<mws-conversation-list-item class="unread"><a href="/web/conversations/1"><span class="name">Bank</span><span class="snippet-text">Old code 123456</span></a></mws-conversation-list-item>');
   const { document } = dom.window;

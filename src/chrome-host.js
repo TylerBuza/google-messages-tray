@@ -57,10 +57,10 @@ function installPageCompanion() {
   });
   installNotificationHook();
   const start = () => {
-    const watcher = createWatcher(document, notify);
+    const watcher = createWatcher(document, notify, count => window.__messagesTrayUnread(count).catch(() => {}));
     let timer;
     new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(watcher.scan, 350); })
-      .observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'data-is-unread'] });
+      .observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'data-is-unread', 'data-e2e-is-unread'] });
     watcher.scan(); setInterval(watcher.scan, 3000);
   };
   window.addEventListener('DOMContentLoaded', start, { once: true });
@@ -76,8 +76,8 @@ function installHideButton() {
 }
 
 class ChromeHost {
-  constructor({ profile, url, onMessage, onDisconnect, onError, offline = false }) {
-    Object.assign(this, { profile, url, onMessage, onDisconnect, onError, offline });
+  constructor({ profile, url, onMessage, onUnread, onDisconnect, onError, offline = false }) {
+    Object.assign(this, { profile, url, onMessage, onUnread, onDisconnect, onError, offline });
     this.browser = null; this.page = null; this.controller = null; this.stopping = false;
   }
   async start() {
@@ -103,6 +103,11 @@ class ChromeHost {
       if (new URL(this.page.url()).origin !== 'https://messages.google.com') return;
       try { const data = JSON.parse(text); this.onMessage(data); } catch { /* Invalid page payload. */ }
     });
+    await this.page.exposeFunction('__messagesTrayUnread', async count => {
+      if (this.stopping || new URL(this.page.url()).origin !== 'https://messages.google.com') return;
+      if (count !== null && (!Number.isSafeInteger(count) || count < 0 || count > 100000)) return;
+      this.onUnread?.(count);
+    });
     await this.page.exposeFunction('__messagesTrayHide', async () => {
       const origin = new URL(this.page.url()).origin;
       if (['https://messages.google.com', 'https://accounts.google.com'].includes(origin)) await this.hide();
@@ -111,7 +116,7 @@ class ChromeHost {
     this.page.on('domcontentloaded', () => this.page.evaluate(installHideButton).catch(() => {}));
     if (this.offline) {
       await this.page.setRequestInterception(true);
-      this.page.on('request', request => request.respond({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Offline smoke test</title><body><script>setTimeout(() => new Notification("Smoke test sender", {body:"Your verification code is 123456."}), 1500);</script></body>' }).catch(() => {}));
+      this.page.on('request', request => request.respond({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Offline smoke test</title><body><mws-conversations-list><mws-conversation-list-item><a href="/web/conversations/test" data-e2e-is-unread="true"><span class="name">Example</span><span class="snippet-text">Fictional unread text</span></a></mws-conversation-list-item></mws-conversations-list><script>setTimeout(() => new Notification("Smoke test sender", {body:"Your verification code is 123456."}), 1500);</script></body>' }).catch(() => {}));
     }
     if (startHidden) await this.hide(); else await this.show();
     // Do not delay tray startup waiting for Google's network or account redirects.
