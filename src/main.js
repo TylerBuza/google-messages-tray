@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, Tray, Menu, ipcMain, clipboard, screen, nativeImage, powerMonitor, dialog } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, clipboard, screen, nativeImage, powerMonitor, dialog, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { extractCode, MessageGate } = require('./codes');
@@ -21,6 +21,8 @@ let host, starting, tray, quitting = false, paused = false, locked = false;
 let lastCode = null;
 let unreadCount = null;
 const trayImages = new Map();
+const smokeExternalLinks = [];
+let smokeFinished = false;
 const gate = new MessageGate();
 const popups = new Map();
 async function showMessages() {
@@ -45,12 +47,15 @@ async function startChrome() {
   if (starting) return starting;
   host = new ChromeHost({ profile: path.join(app.getPath('userData'), 'chrome-profile'), url: HOME, offline: smokeTest,
     onMessage: receiveMessage, onUnread: setUnreadCount,
+    onExternalLink: url => smokeTest ? smokeExternalLinks.push(url) : shell.openExternal(url),
     onDisconnect: () => { setUnreadCount(null); if (tray) tray.setToolTip('Messages Tray — Chrome closed; double-click to reopen'); },
     onError: () => { setUnreadCount(null); if (tray) tray.setToolTip('Messages Tray — page failed to load; open Messages to retry'); } });
   starting = host.start();
   try { await starting; } finally { starting = null; }
 }
 async function finishSmoke(code, message) {
+  if (smokeFinished) return;
+  smokeFinished = true;
   console.log(message);
   const reportDirectory = path.join(app.getPath('temp'), 'messages-tray-tests');
   fs.mkdirSync(reportDirectory, { recursive: true });
@@ -138,7 +143,17 @@ function showPopup(data) {
           await host.hide();
           const hideButton = await host.page.$('#__messagesTrayHide');
           if (!hideButton) throw new Error('Hide to tray button missing');
-          await finishSmoke(0, 'SMOKE PASS: Chrome notification → Copy popup; unread flag enables and clears tray badge; X hides without closing; tray restores Chrome.');
+          await host.show();
+          await host.page.bringToFront();
+          await host.page.click('#external-link');
+          await host.page.evaluate(() => window.open('https://example.org/messages-tray-window-test'));
+          await host.page.evaluate(() => { location.href = 'https://example.org/messages-tray-navigation-test'; }).catch(() => {});
+          await new Promise(resolve => setTimeout(resolve, 500));
+          if (smokeExternalLinks.length !== 3 || !smokeExternalLinks.includes('https://example.org/messages-tray-click-test') ||
+              !smokeExternalLinks.includes('https://example.org/messages-tray-window-test') || !smokeExternalLinks.includes('https://example.org/messages-tray-navigation-test')) throw new Error('External link routes did not reach the default-browser handler');
+          if (!host.page.url().startsWith(HOME) || (await host.browser.pages()).length !== 1) throw new Error('External link escaped into the dedicated Chrome profile');
+          await host.hide();
+          await finishSmoke(0, 'SMOKE PASS: notification, unread badge, X-to-tray; clicked links, window.open, and same-tab external navigation use the default-browser handler without replacing Messages.');
         } catch (error) { await finishSmoke(1, 'SMOKE FAIL: ' + error.message); }
       }, 800);
     }

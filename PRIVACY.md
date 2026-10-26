@@ -26,6 +26,8 @@ The companion controls **only its own Chrome instance** using a random loopback 
 
 Use only on a trusted PC. Do not use the dedicated profile for banking, email, or unrelated browsing. Quit the app when not needed. Do not forward or expose the debugging port. Shutdown requests close this dedicated Chrome instance; they do not close your normal Chrome windows.
 
+Web links from messages are routed through Windows' default browser so unrelated sites do not reuse the Messages profile. This launches the requested HTTP(S) URL locally; the destination then sees the normal browser's cookies and privacy settings. The companion does not choose a particular profile when you have several normal Chrome profiles, and it does not log the URLs. Google Messages and Google sign-in navigation remain in the dedicated profile.
+
 ## X-to-tray helper
 
 A bundled PowerShell/C# Windows helper installs a low-level mouse hook while the app runs. It ignores mouse movement and checks left-button events against the companion's Chrome process and native caption-button bounds. It swallows that window's X click to hide the window and taskbar entry instead of closing Chrome. It records no mouse history, sends no input data to a server, and installs no keyboard hook. Windows removes the hook when its helper exits.

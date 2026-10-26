@@ -6,6 +6,7 @@ const { spawn } = require('node:child_process');
 const readline = require('node:readline');
 const { installNotificationHook } = require('./page-hook');
 const { createWatcher } = require('./watcher');
+const { isCompanionUrl, getExternalUrl, installLinkRouting } = require('./links');
 
 function findChrome(env = process.env) {
   const candidates = [env.PROGRAMFILES, env['PROGRAMFILES(X86)'], env.LOCALAPPDATA]
@@ -76,9 +77,44 @@ function installHideButton() {
 }
 
 class ChromeHost {
-  constructor({ profile, url, onMessage, onUnread, onDisconnect, onError, offline = false }) {
-    Object.assign(this, { profile, url, onMessage, onUnread, onDisconnect, onError, offline });
+  constructor({ profile, url, onMessage, onUnread, onExternalLink, onDisconnect, onError, offline = false }) {
+    Object.assign(this, { profile, url, onMessage, onUnread, onExternalLink, onDisconnect, onError, offline });
     this.browser = null; this.page = null; this.controller = null; this.stopping = false;
+    this.externalRequests = new Map();
+    this.routedPages = new WeakSet();
+  }
+  async openExternal(value) {
+    if (this.stopping || !this.page || !isCompanionUrl(this.page.url())) return;
+    const url = getExternalUrl(value, this.page.url());
+    if (!url) return;
+    const now = Date.now();
+    for (const [key, time] of this.externalRequests) if (now - time > 1500) this.externalRequests.delete(key);
+    if (this.externalRequests.has(url) || this.externalRequests.size >= 8) return;
+    this.externalRequests.set(url, now);
+    try { await this.onExternalLink?.(url); } catch { this.onError?.(new Error('Could not open the link in your default browser.')); }
+  }
+  async routePage(page, popup = false) {
+    if (this.routedPages.has(page)) return;
+    this.routedPages.add(page);
+    await page.setRequestInterception(true);
+    page.on('request', request => {
+      const external = request.isNavigationRequest() && request.frame() === page.mainFrame() && getExternalUrl(request.url());
+      if (external) {
+        request.abort('aborted').catch(() => {});
+        this.openExternal(external);
+        if (popup) page.close().catch(() => {});
+      } else if (this.offline) {
+        request.respond({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Offline smoke test</title><body><a id="external-link" href="https://example.org/messages-tray-click-test" target="_blank">Fictional external link</a><mws-conversations-list><mws-conversation-list-item><a href="/web/conversations/test" data-e2e-is-unread="true"><span class="name">Example</span><span class="snippet-text">Fictional unread text</span></a></mws-conversation-list-item></mws-conversations-list><script>setTimeout(() => new Notification("Smoke test sender", {body:"Your verification code is 123456."}), 1500);</script></body>' }).catch(() => {});
+      } else request.continue().catch(() => {});
+    });
+    if (popup) {
+      const routePopup = async () => {
+        const external = getExternalUrl(page.url());
+        if (external) { await this.openExternal(external); await page.close().catch(() => {}); }
+      };
+      page.on('framenavigated', frame => { if (frame === page.mainFrame()) routePopup().catch(() => {}); });
+      await routePopup();
+    }
   }
   async start() {
     const executablePath = findChrome();
@@ -108,16 +144,19 @@ class ChromeHost {
       if (count !== null && (!Number.isSafeInteger(count) || count < 0 || count > 100000)) return;
       this.onUnread?.(count);
     });
+    await this.page.exposeFunction('__messagesTrayExternal', value => this.openExternal(value));
     await this.page.exposeFunction('__messagesTrayHide', async () => {
       const origin = new URL(this.page.url()).origin;
       if (['https://messages.google.com', 'https://accounts.google.com'].includes(origin)) await this.hide();
     });
     await this.page.evaluateOnNewDocument(`(() => { const installNotificationHook = ${installNotificationHook.toString()}; const createWatcher = ${createWatcher.toString()}; (${installPageCompanion.toString()})(); })()`);
+    await this.page.evaluateOnNewDocument(`(() => { const isCompanionUrl = ${isCompanionUrl.toString()}; const getExternalUrl = ${getExternalUrl.toString()}; (${installLinkRouting.toString()})(); })()`);
     this.page.on('domcontentloaded', () => this.page.evaluate(installHideButton).catch(() => {}));
-    if (this.offline) {
-      await this.page.setRequestInterception(true);
-      this.page.on('request', request => request.respond({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Offline smoke test</title><body><mws-conversations-list><mws-conversation-list-item><a href="/web/conversations/test" data-e2e-is-unread="true"><span class="name">Example</span><span class="snippet-text">Fictional unread text</span></a></mws-conversation-list-item></mws-conversations-list><script>setTimeout(() => new Notification("Smoke test sender", {body:"Your verification code is 123456."}), 1500);</script></body>' }).catch(() => {}));
-    }
+    await this.routePage(this.page);
+    this.browser.on('targetcreated', async target => {
+      if (this.stopping || target.type() !== 'page') return;
+      try { const popup = await target.page(); if (popup && popup !== this.page) await this.routePage(popup, true); } catch { /* Popup already closed. */ }
+    });
     if (startHidden) await this.hide(); else await this.show();
     // Do not delay tray startup waiting for Google's network or account redirects.
     this.page.goto(this.url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(error => this.onError?.(error));

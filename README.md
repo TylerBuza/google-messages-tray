@@ -22,6 +22,7 @@
 - **Copy verification codes.** Detected numeric OTP / 2FA codes get a one-click **Copy** button.
 - **Click X, keep receiving.** The app's close button hides the window instead of shutting down Messages.
 - **Unread tray badge.** A small red dot marks observed unread conversations, even with popups paused. Reading them clears it; simply opening the window does not.
+- **Links use your normal browser.** Web links from messages open through Windows' default browser, outside the dedicated Messages profile. Google's Messages and sign-in pages stay in the app.
 - **Open only when you need it.** Double-click the tray icon to read or reply in Google's familiar web interface.
 - **Portable Windows app.** No browser extension, administrator access, or installer required. Starting with Windows is optional.
 - **Local companion, open source.** No app analytics, message-forwarding service, or subscription. Google Messages itself still connects to Google.

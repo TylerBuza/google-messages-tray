@@ -30,6 +30,10 @@ Supported patterns are numeric 4–8 digit codes (including `123 456` / `123-456
 
 Mouse-clicking X hides this app's Chrome window. The Hide button and tray Hide command also work. Minimizing is not the same as hiding. Alt+F4/system-menu Close are not intercepted and may close the dedicated browser; double-click the tray icon to reopen it. Use **Quit Messages Tray** to exit cleanly.
 
+## Links and browser profiles
+
+Web links clicked in messages open through Windows' default browser, not the dedicated Messages profile. If Chrome is your Windows default, this uses your normal Chrome instance/profile selection; the companion does not choose between multiple normal Chrome profiles. Change the default browser in Windows Settings if needed. Messages and Google account sign-in pages remain in the app. Only HTTP(S) URLs are passed to the operating system; file and executable schemes are never forwarded by the companion.
+
 ## Windows warned about the download
 
 Published EXEs are unsigned; the Windows helper also uses PowerShell and a native mouse hook. Security products can flag such behavior. Do not broadly disable security protections. Inspect the source, verify release checksums, build locally, or choose not to run it if you do not trust it.

@@ -1,6 +1,6 @@
 {
   "name": "messages-tray",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "Unofficial Google Messages tray app for Windows with desktop notifications and one-click SMS verification code copying.",
   "author": { "name": "Tyler Buza", "url": "https://github.com/TylerBuza" },
