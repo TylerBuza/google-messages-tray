@@ -1,0 +1,60 @@
+name: VirusTotal release submission
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag to submit (for example v1.0.3)
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: virustotal-release-submissions
+  cancel-in-progress: false
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Check API key configuration
+        env:
+          VT_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+        run: |
+          if [ -z "$VT_KEY" ]; then
+            echo "::error::Add the VIRUSTOTAL_API_KEY Actions secret. No file has been submitted."
+            exit 1
+          fi
+      - name: Download and verify the published EXE
+        id: prepare
+        run: node scripts/virustotal-release.js prepare
+      # A submission over 32 MB uses two API requests. Space serialized runs so
+      # backfills do not exceed the usual free-tier limit of four requests/minute.
+      - name: Space free-tier submissions
+        run: sleep 35
+      - name: Submit EXE to VirusTotal
+        id: submit
+        uses: crazy-max/ghaction-virustotal@936d8c5c00afe97d3d9a1af26d017cfdf26800a2 # v5
+        with:
+          vt_api_key: ${{ secrets.VIRUSTOTAL_API_KEY }}
+          github_token: ${{ github.token }}
+          update_release_body: false
+          request_rate: 1
+          files: ${{ github.event_name == 'release' && steps.prepare.outputs.release_pattern || 'scan-assets/*.exe' }}
+      - name: Add submission and report links to release
+        env:
+          VT_ANALYSIS: ${{ steps.submit.outputs.analysis }}
+        run: node scripts/virustotal-release.js submitted

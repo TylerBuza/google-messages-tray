@@ -45,6 +45,12 @@ Requires **Windows 10/11 x64**, installed **Google Chrome**, and an Android phon
 
 > **Unsigned download:** Windows may show a SmartScreen warning. Releases are not code-signed. Check the published SHA-256 checksum, inspect the source, or build it yourself; do not run a binary you do not trust. A checksum verifies file integrity, not publisher identity or safety.
 
+### VirusTotal reports
+
+Release notes include a SHA-256 VirusTotal lookup link. **A lookup link does not mean a scan was submitted or completed.** When the configured release workflow uploads an EXE, the notes also record its submission time and analysis link. Check the live report for actual engine results; submission success is not a clean verdict. VirusTotal results do not guarantee safety, and unsigned apps/native hooks can trigger heuristic detections.
+
+Only already-public release EXEs are submitted, never messages or Chrome profiles. Submissions may be shared with security vendors. Maintainers: see [VirusTotal setup and older-release submissions](docs/VIRUSTOTAL.md).
+
 <details>
 <summary>Upgrading from an earlier version</summary>
 

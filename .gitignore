@@ -3,6 +3,7 @@ dist/
 dist-v*/
 *.log
 release/
+scan-assets/
 .env
 .env.*
 !.env.example
