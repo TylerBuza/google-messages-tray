@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const { extractCode, MessageGate } = require('./codes');
 const { ChromeHost } = require('./chrome-host');
 const { addUnreadBadge } = require('./tray-badge');
+const { choosePopupSlot, detachPopup, stackPopupBounds } = require('./popup-policy');
 
 const HOME = 'https://messages.google.com/web/conversations';
 const smokeTest = process.argv.includes('--smoke-test');
@@ -23,6 +24,8 @@ let unreadCount = null;
 const trayImages = new Map();
 const smokeExternalLinks = [];
 let smokeFinished = false;
+let smokeStarted = false;
+let popupRevision = 0;
 const gate = new MessageGate();
 const popups = new Map();
 async function showMessages() {
@@ -40,7 +43,11 @@ function receiveMessage(payload) {
   const title = payload.title.slice(0, 200), body = payload.body.slice(0, 4000);
   if (!body || !gate.accept(title, body)) return;
   const code = extractCode(body);
-  if (code) { lastCode = { code, time: Date.now() }; updateMenu(); }
+  if (code) {
+    const shortcutWasAvailable = Boolean(lastCode && Date.now() - lastCode.time < 300000);
+    lastCode = { code, time: Date.now() };
+    if (!shortcutWasAvailable) updateMenu();
+  }
   showPopup({ title, body, code });
 }
 async function startChrome() {
@@ -71,8 +78,9 @@ function makeTrayIcon(unread = false) {
 }
 function setUnreadCount(count) {
   if (count === unreadCount) return;
+  const wasUnread = unreadCount > 0;
   unreadCount = count;
-  if (tray) { tray.setImage(makeTrayIcon(count > 0)); updateMenu(); }
+  if (tray && wasUnread !== (count > 0)) { tray.setImage(makeTrayIcon(count > 0)); updateMenu(); }
 }
 function updateMenu() {
   if (!tray) return;
@@ -93,37 +101,71 @@ function updateMenu() {
     { label: 'Quit Messages Tray', click: () => app.quit() }
   ]));
 }
-function closePopups() { for (const popup of [...popups.values()]) popup.window.close(); }
+function removePopup(id) {
+  detachPopup(popups, id, popup => {
+    clearTimeout(popup.timer); clearTimeout(popup.deliveryTimer);
+    popup.pending = null;
+    if (!popup.window.isDestroyed()) popup.window.close();
+  });
+  layoutPopups();
+}
+function closePopups() { for (const id of [...popups.keys()]) removePopup(id); }
 function layoutPopups() {
   const area = screen.getPrimaryDisplay().workArea;
-  [...popups.values()].reverse().forEach((popup, index) => {
-    if (!popup.window.isDestroyed()) popup.window.setPosition(area.x + area.width - 396, area.y + area.height - 226 - index * 222);
+  const visible = [...popups.values()].reverse().filter(popup => popup.shown && !popup.window.isDestroyed());
+  const bounds = stackPopupBounds(visible.map(popup => ({ width: 380, height: popup.requestedHeight || 170 })), area);
+  visible.forEach((popup, index) => {
+    const current = popup.window.getBounds(), target = bounds[index];
+    if (['x', 'y', 'width', 'height'].some(key => Math.abs(current[key] - target[key]) > 1)) popup.window.setBounds(target);
   });
 }
 function scheduleClose(popup, delay = 18000) {
   clearTimeout(popup.timer);
-  popup.timer = setTimeout(() => { if (!popup.window.isDestroyed()) popup.window.close(); }, delay);
+  if (!popup.hovered) popup.timer = setTimeout(() => removePopup(popup.id), delay);
+}
+function sendPopupData(popup) {
+  if (!popup.ready || popup.closing || popup.window.isDestroyed()) return;
+  popup.window.webContents.send('popup-data', popup.data);
+}
+function updatePopup(popup, data) {
+  popup.data = { ...data, revision: ++popupRevision };
+  popup.pending = null;
+  popups.delete(popup.id); popups.set(popup.id, popup);
+  scheduleClose(popup);
+  // Bound renderer traffic: one delivery per 50 ms, always with the newest text.
+  if (popup.ready && !popup.deliveryTimer) popup.deliveryTimer = setTimeout(() => {
+    popup.deliveryTimer = null; sendPopupData(popup);
+  }, 50);
 }
 function showPopup(data) {
   if (locked) return;
-  while (popups.size >= 3) popups.values().next().value.window.close();
-  const window = new BrowserWindow({ width: 380, height: 210, show: false, frame: false, resizable: false,
+  const slot = choosePopupSlot(popups, data.title);
+  if (slot.action === 'defer') { slot.popup.pending = data; return; }
+  if (slot.action === 'reuse') { updatePopup(slot.popup, data); return; }
+  if (slot.action === 'skip') return;
+  const window = new BrowserWindow({ width: 380, height: 170, show: false, frame: false, resizable: false,
     skipTaskbar: true, alwaysOnTop: true, autoHideMenuBar: true, backgroundColor: '#151b28',
     webPreferences: { preload: path.join(__dirname, 'popup-preload.js'), nodeIntegration: false, contextIsolation: true, sandbox: true } });
-  const popup = { window, data, timer: null };
   const popupId = window.webContents.id;
+  const popup = { id: popupId, window, data: { ...data, revision: ++popupRevision }, timer: null, deliveryTimer: null,
+    ready: false, shown: false, hovered: false, closing: false, pending: null };
   popups.set(popupId, popup);
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.once('ready-to-show', () => {
-    if (locked) { window.close(); return; }
-    window.webContents.send('popup-data', data);
-    layoutPopups(); window.showInactive(); scheduleClose(popup);
-    if (smokeTest) {
+    if (locked || popup.closing) { removePopup(popupId); return; }
+    popup.ready = true;
+    sendPopupData(popup);
+    scheduleClose(popup);
+    if (smokeTest && !smokeStarted) {
+      smokeStarted = true;
       setTimeout(async () => {
         try {
           const result = await window.webContents.executeJavaScript('({title: document.getElementById("sender").textContent, button: document.getElementById("copy").textContent, hidden: document.getElementById("copy").hidden})');
           if (result.title !== 'Smoke test sender' || result.button !== 'Copy 123456' || result.hidden) throw new Error('Popup payload or Copy button mismatch');
+          const contentHeight = await window.webContents.executeJavaScript('Math.ceil(document.body.getBoundingClientRect().height)');
+          // Windows can add a 1–2 DIP non-client edge on a frameless window.
+          if (!popup.shown || Math.abs(window.getContentBounds().height - contentHeight) > 3) throw new Error('Popup window does not fit its content: ' + JSON.stringify({ shown: popup.shown, bounds: window.getBounds(), native: window.getContentBounds(), content: contentHeight, requested: popup.requestedHeight, screen: screen.getPrimaryDisplay().scaleFactor }));
           await starting;
           const realChrome = await host.page.evaluate('({webdriver: navigator.webdriver, ua: navigator.userAgent})');
           if (realChrome.webdriver || /Electron/.test(realChrome.ua)) throw new Error('Expected regular Chrome without WebDriver mode');
@@ -153,13 +195,25 @@ function showPopup(data) {
               !smokeExternalLinks.includes('https://example.org/messages-tray-window-test') || !smokeExternalLinks.includes('https://example.org/messages-tray-navigation-test')) throw new Error('External link routes did not reach the default-browser handler');
           if (!host.page.url().startsWith(HOME) || (await host.browser.pages()).length !== 1) throw new Error('External link escaped into the dedicated Chrome profile');
           await host.hide();
-          await finishSmoke(0, 'SMOKE PASS: notification, unread badge, X-to-tray; clicked links, window.open, and same-tab external navigation use the default-browser handler without replacing Messages.');
+          for (let i = 0; i < 300; i++) showPopup({ title: `Fictional chat ${i % 7}`, body: `Fictional burst message ${i}`, code: null });
+          if (popups.size !== 3) throw new Error('Burst exceeded the three-window limit');
+          await new Promise(resolve => setTimeout(resolve, 600));
+          if (popups.size !== 3 || [...popups.values()].some(item => !item.ready || !item.shown)) throw new Error('Burst popup windows did not stay responsive');
+          for (const item of popups.values()) {
+            const height = await item.window.webContents.executeJavaScript('Math.ceil(document.body.getBoundingClientRect().height)');
+            if (Math.abs(item.window.getContentBounds().height - height) > 3) throw new Error('Burst popup has unused space: ' + JSON.stringify({ native: item.window.getContentBounds().height, content: height, revision: item.data.revision }));
+          }
+          closePopups();
+          if (popups.size !== 0) throw new Error('Popup close did not retire slots synchronously');
+          await finishSmoke(0, 'SMOKE PASS: compact auto-sized popups; 300-message burst bounded to three responsive windows; existing notifications, unread badge, links, and X-to-tray pass.');
         } catch (error) { await finishSmoke(1, 'SMOKE FAIL: ' + error.message); }
       }, 800);
     }
   });
-  window.on('closed', () => { clearTimeout(popup.timer); popups.delete(popupId); layoutPopups(); });
-  window.loadFile(path.join(__dirname, 'popup.html'));
+  window.on('closed', () => { clearTimeout(popup.timer); clearTimeout(popup.deliveryTimer); detachPopup(popups, popupId); layoutPopups(); });
+  window.webContents.on('render-process-gone', () => removePopup(popupId));
+  window.loadFile(path.join(__dirname, 'popup.html')).catch(() => removePopup(popupId));
+  scheduleClose(popup);
 }
 
 if (ownLock) {
@@ -180,14 +234,30 @@ if (ownLock) {
       if (smokeTest) finishSmoke(1, 'SMOKE FAIL: ' + error.message);
       else dialog.showErrorBox('Could not open Google Chrome', error.message);
     });
-    ipcMain.handle('popup-copy', event => {
+    ipcMain.handle('popup-copy', (event, revision) => {
       const popup = popups.get(event.sender.id);
-      if (!popup?.data.code || locked) return false;
+      if (!popup?.data.code || popup.data.revision !== revision || locked) return false;
       clipboard.writeText(popup.data.code); scheduleClose(popup, 1600); return true;
     });
-    ipcMain.on('popup-open', event => { const popup = popups.get(event.sender.id); if (popup) { showMessages(); popup.window.close(); } });
-    ipcMain.on('popup-close', event => popups.get(event.sender.id)?.window.close());
-    ipcMain.on('popup-hover', (event, hover) => { const popup = popups.get(event.sender.id); if (popup) { if (hover) clearTimeout(popup.timer); else scheduleClose(popup, 10000); } });
+    ipcMain.on('popup-open', event => { if (popups.has(event.sender.id)) { showMessages(); removePopup(event.sender.id); } });
+    ipcMain.on('popup-close', event => removePopup(event.sender.id));
+    ipcMain.on('popup-hover', (event, hover) => {
+      const popup = popups.get(event.sender.id); if (!popup) return;
+      popup.hovered = Boolean(hover);
+      if (hover) clearTimeout(popup.timer);
+      else { if (popup.pending) updatePopup(popup, popup.pending); scheduleClose(popup, 10000); }
+    });
+    ipcMain.on('popup-size', (event, height, revision) => {
+      const popup = popups.get(event.sender.id);
+      if (!popup || popup.closing || popup.data.revision !== revision || !Number.isFinite(height)) return;
+      height = Math.max(96, Math.min(320, Math.ceil(height)));
+      // Apply size and position together from stable CSS dimensions. Reusing
+      // rounded native bounds can accumulate errors at fractional Windows DPI.
+      popup.requestedHeight = height;
+      const firstShow = !popup.shown;
+      popup.shown = true; layoutPopups();
+      if (firstShow) popup.window.showInactive();
+    });
     powerMonitor.on('lock-screen', () => { locked = true; closePopups(); lastCode = null; updateMenu(); });
     powerMonitor.on('unlock-screen', () => { locked = false; });
     app.on('activate', showMessages);

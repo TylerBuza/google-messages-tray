@@ -66,7 +66,7 @@ There is no subscription, extension, or app backend. There **is** an Electron + 
 ## Known limitations
 
 - **Best-effort notification detection.** Google has no public Messages notification API for this use. Site changes, service-worker notifications, pairing issues, network interruptions, and sleep can interrupt or duplicate delivery. Do not rely on it as your only way to receive an important code.
-- **Custom desktop popups, not Windows Notification Center toasts.** They last about 18 seconds, stack up to three, and pause while hovered. They do not enter notification history. Windows Do Not Disturb does not control them; use **Pause notifications** in the tray.
+- **Custom desktop popups, not Windows Notification Center toasts.** They fit their content, last about 18 seconds, stack up to three, and pause while hovered. Rapid messages from the same chat share a popup showing the latest text; bursts reuse the existing windows instead of opening an unlimited backlog. Hovered messages are not replaced until you move away. They do not enter notification history. Windows Do Not Disturb does not control them; use **Pause notifications** in the tray.
 - **Numeric codes only:** 4–8 digits, including `123 456` and `123-456`. Detection is heuristic; check the code before using it. Alphanumeric codes or codes missing from Google's preview need manual copying.
 - **Mouse X hides; Alt+F4 does not.** Keyboard Alt+F4 and Chrome's system-menu Close are not intercepted. Minimizing alone may leave a taskbar icon.
 - Clicking a popup opens the existing Messages window, not necessarily the sender's thread. No conversations are automatically opened to fetch codes.
