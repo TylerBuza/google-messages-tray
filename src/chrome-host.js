@@ -19,10 +19,16 @@ async function localPort() {
     server.listen(0, '127.0.0.1', () => { const port = server.address().port; server.close(() => resolve(port)); });
   });
 }
+function windowHelperPath(directory = __dirname) {
+  return path.join(directory.replace(/([\\/])app\.asar(?=[\\/])/, '$1app.asar.unpacked'), 'window-helper.ps1');
+}
 function makeWindowController(pid) {
-  const source = fs.readFileSync(path.join(__dirname, 'window-helper.ps1'), 'utf8').replace('__OWNER_PID__', String(pid));
+  // Run the bundled script as a file; embedding its full C# source in an encoded
+  // command can exceed Windows' command-line length limit as the helper grows.
+  const scriptPath = windowHelperPath();
+  if (!fs.existsSync(scriptPath)) throw new Error('Bundled Windows helper is missing');
   const helper = spawn(path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'),
-    ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(source, 'utf16le').toString('base64')],
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-OwnerPid', String(pid)],
     { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   let pending = [];
   const rejectPending = () => { for (const item of pending.splice(0)) { clearTimeout(item.timer); item.reject(new Error('Window helper exited')); } };
@@ -161,7 +167,13 @@ class ChromeHost {
     // Do not delay tray startup waiting for Google's network or account redirects.
     this.page.goto(this.url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(error => this.onError?.(error));
   }
-  async show() { if (this.controller) return this.controller.command('show'); }
+  async show() {
+    if (!this.controller) return;
+    // Select the Messages tab as well as raising its native window. Native focus
+    // runs last so Chrome activation cannot be undone by the separate tray UI.
+    if (this.page && !this.page.isClosed()) await this.page.bringToFront().catch(() => {});
+    return this.controller.command('show');
+  }
   async hide() { if (this.controller) return this.controller.command('hide'); }
   async status() { if (this.controller) return this.controller.command('status'); }
   async testClose() { if (this.offline && this.controller) return this.controller.command('test-close'); }
@@ -172,4 +184,4 @@ class ChromeHost {
     this.controller?.stop(); this.browser = null;
   }
 }
-module.exports = { ChromeHost, findChrome };
+module.exports = { ChromeHost, findChrome, windowHelperPath };

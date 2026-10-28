@@ -32,6 +32,8 @@ Web links from messages are routed through Windows' default browser so unrelated
 
 A bundled PowerShell/C# Windows helper installs a low-level mouse hook while the app runs. It ignores mouse movement and checks left-button events against the companion's Chrome process and native caption-button bounds. It swallows that window's X click to hide the window and taskbar entry instead of closing Chrome. It records no mouse history, sends no input data to a server, and installs no keyboard hook. Windows removes the hook when its helper exits.
 
+On an explicit request to open Messages, the helper restores and activates only the companion's Chrome window. Windows may require temporary thread-input attachment or a brief raise/demotion to honor the request from the separate tray process. Attachments are released immediately; the app does not change global foreground-lock settings, inject keystrokes, or leave Messages permanently always-on-top. Background notification arrivals do not use this activation path.
+
 ## External connections
 
 Google Chrome / Google Messages connect to Google normally. The companion adds no telemetry, remote OTP processing, or automatic update checker. GitHub-hosted documentation images/badges and links can create requests when viewed in a browser; npm/build tools download dependencies when building. The synthetic smoke test fulfills its test page request locally, but Chrome itself may still make background connections.

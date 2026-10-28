@@ -30,6 +30,9 @@ const gate = new MessageGate();
 const popups = new Map();
 async function showMessages() {
   try {
+    // An explicit open dismisses previews, not messages. This also prevents an
+    // always-on-top popup from competing with the Chrome restore/focus action.
+    closePopups();
     if (starting) await starting;
     else if (!host?.browser?.connected) await startChrome();
     await host.show();
@@ -173,10 +176,27 @@ function showPopup(data) {
           await host.page.evaluate(() => document.querySelector('[data-e2e-is-unread]').setAttribute('data-e2e-is-unread', 'false'));
           await new Promise(resolve => setTimeout(resolve, 750));
           if (unreadCount !== 0) throw new Error('Marking the conversation read did not clear the tray badge');
+          await host.page.evaluate(() => document.querySelector('[data-e2e-is-unread]').setAttribute('data-e2e-is-unread', 'true'));
+          await new Promise(resolve => setTimeout(resolve, 450));
+          if (unreadCount !== 1) throw new Error('Restored unread flag did not enable the tray badge');
+          await host.page.evaluate(() => {
+            const list = document.querySelector('mws-conversations-list');
+            list.innerHTML = '<mws-conversation-list-item><a href="/web/conversations/read-test" data-e2e-is-unread="false"><span class="name">Example</span><span class="snippet-text">Fictional read text</span></a></mws-conversation-list-item>';
+          });
+          await new Promise(resolve => setTimeout(resolve, 450));
+          if (unreadCount !== 0) throw new Error('Removed conversation left a phantom unread badge');
           await host.hide();
           const hidden = await host.status();
           if (!hidden.count || hidden.visible !== 0) throw new Error('Chrome window failed to hide');
-          await host.show();
+          const competitor = new BrowserWindow({ width: 420, height: 160, show: false, title: 'Messages Tray focus test',
+            webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
+          try {
+            await competitor.loadURL('data:text/html,<title>Focus test</title><p>Fictional window for foreground restore testing.</p>');
+            competitor.show(); competitor.focus();
+            await host.show();
+            const focused = await host.status();
+            if (!focused.foreground || focused.topmost) throw new Error('Messages was not restored above another window without permanent topmost');
+          } finally { competitor.destroy(); }
           const close = await host.testClose();
           if (!close.hookActive || !close.closeHandled || close.visible !== 0) throw new Error('Native X click handler failed to hide Chrome: ' + JSON.stringify(close));
           if (!host.browser.connected || host.page.isClosed()) throw new Error('X closed Chrome instead of hiding it');
@@ -203,9 +223,11 @@ function showPopup(data) {
             const height = await item.window.webContents.executeJavaScript('Math.ceil(document.body.getBoundingClientRect().height)');
             if (Math.abs(item.window.getContentBounds().height - height) > 3) throw new Error('Burst popup has unused space: ' + JSON.stringify({ native: item.window.getContentBounds().height, content: height, revision: item.data.revision }));
           }
-          closePopups();
-          if (popups.size !== 0) throw new Error('Popup close did not retire slots synchronously');
-          await finishSmoke(0, 'SMOKE PASS: compact auto-sized popups; 300-message burst bounded to three responsive windows; existing notifications, unread badge, links, and X-to-tray pass.');
+          await showMessages();
+          if (popups.size !== 0) throw new Error('Explicit open did not dismiss popup previews');
+          const finalFocus = await host.status();
+          if (!finalFocus.foreground || finalFocus.topmost) throw new Error('Opening Messages with a notification burst did not foreground the app');
+          await finishSmoke(0, 'SMOKE PASS: removed unread rows clear the badge; foreground restore with pending popups; compact 300-message burst, links, and X-to-tray.');
         } catch (error) { await finishSmoke(1, 'SMOKE FAIL: ' + error.message); }
       }, 800);
     }

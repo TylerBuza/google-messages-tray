@@ -5,8 +5,6 @@
 function createWatcher(document, notify, onUnreadChange = () => {}) {
   let baseline = false;
   const seen = new Map();
-  // Remember observed rows when Google's virtual list scrolls them out of the DOM.
-  const unreadSeen = new Map();
   let lastUnread;
   const selector = 'mws-conversation-list-item, mw-conversation-list-item';
   function reportUnread(count) {
@@ -16,10 +14,13 @@ function createWatcher(document, notify, onUnreadChange = () => {}) {
     const rows = [...document.querySelectorAll(selector)];
     if (!rows.length) {
       if (document.querySelector('mws-conversations-list, mw-conversations-list')) {
-        unreadSeen.clear(); reportUnread(0);
+        reportUnread(0);
       } else reportUnread(null);
       return;
     }
+    // Unread status is a current DOM snapshot, never historical evidence. A row
+    // removed by read/archive/delete/sync cannot leave a permanent phantom badge.
+    const unreadNow = new Map();
     for (const row of rows) {
       const link = row.querySelector('a[href*="/conversations/"]');
       const id = link?.getAttribute('href') || row.getAttribute('data-conversation-id');
@@ -29,7 +30,7 @@ function createWatcher(document, notify, onUnreadChange = () => {}) {
       const explicit = flag?.getAttribute('data-e2e-is-unread') ?? flag?.getAttribute('data-is-unread');
       const unread = explicit === 'true' || (explicit !== 'false' && (
         row.matches('.unread') || Boolean(row.querySelector('.unread, .unread-indicator, .unread-dot'))));
-      unreadSeen.set(id, unread);
+      unreadNow.set(id, unread);
       const name = row.querySelector('.name, .conversation-name, [data-e2e-conversation-name]')?.textContent?.trim() || 'New message';
       const body = row.querySelector('.snippet-text, .snippet, [data-e2e-conversation-snippet]')?.textContent?.trim();
       if (!body) continue;
@@ -37,7 +38,7 @@ function createWatcher(document, notify, onUnreadChange = () => {}) {
       seen.set(id, body);
       if (baseline && unread && previous !== body && !/^You:\s/i.test(body)) notify({ title: name, body, source: 'list' });
     }
-    reportUnread([...unreadSeen.values()].filter(Boolean).length);
+    reportUnread([...unreadNow.values()].filter(Boolean).length);
     baseline = true;
   }
   return { scan };

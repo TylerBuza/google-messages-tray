@@ -30,6 +30,8 @@ Never commit actual texts, OTPs, Chrome profiles, pairing codes, `.env` files, l
 
 Do not change the internal `messages-tray` package/profile name casually: existing users' sign-in state depends on that profile location. Public branding uses the repository/README title instead.
 
+The PowerShell helper is unpacked via `build.asarUnpack` and launched with `-File`; do not embed its entire C# source in the command line. Foreground activation must target only real companion Chrome app windows, release temporary thread-input attachments, and never leave the window permanently topmost or alter system-wide focus policy. Smoke coverage must check native foreground state, not visibility alone.
+
 ## Test expectations
 
 `npm test` runs code-detection, deduplication, DOM-baseline, notification-shim, and Chrome-discovery tests. These synthetic tests do not establish that every live Google Messages version works.

@@ -26,9 +26,15 @@ Network, pairing, service-worker notifications, active conversations, sleep, and
 
 Supported patterns are numeric 4–8 digit codes (including `123 456` / `123-456`) in messages discussing verification, login, security, or similar context. Alphanumeric codes and truncated previews require manual copying. Heuristics can also select the wrong number: verify before using. Report synthetic examples only.
 
+## Red tray badge but no unread conversations
+
+Update to v1.0.5 or later. Earlier versions could keep an old unread flag after a conversation disappeared from the loaded list. The badge now uses the current list snapshot rather than a history of unread rows. It does not mark texts read or clear the badge merely because you open the window. In an older version, tray → Reload Messages resets that cached badge state, but save any draft first.
+
 ## X / minimizing / closing
 
 Mouse-clicking X hides this app's Chrome window. The Hide button and tray Hide command also work. Minimizing is not the same as hiding. Alt+F4/system-menu Close are not intercepted and may close the dedicated browser; double-click the tray icon to reopen it. Use **Quit Messages Tray** to exit cleanly.
+
+If an older version opens Messages behind other windows, update to v1.0.4 or later. Explicit open actions now dismiss pending popup previews, select the Messages page, and request native foreground activation. Chrome tooltips are excluded from restore/focus handling. This does not make Messages permanently always-on-top or make incoming notifications steal focus.
 
 ## Links and browser profiles
 

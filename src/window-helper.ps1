@@ -1,9 +1,11 @@
+param([Parameter(Mandatory=$true)][uint32]$OwnerPid)
 $ErrorActionPreference = 'Stop'
 Add-Type @'
 using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Collections.Generic;
 public static class TrayChromeWindow {
   public delegate bool EnumProc(IntPtr hwnd, IntPtr param);
   private delegate IntPtr MouseProc(int code, IntPtr message, IntPtr data);
@@ -15,6 +17,15 @@ public static class TrayChromeWindow {
   [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
   [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hwnd, int command);
   [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
+  [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] private static extern bool BringWindowToTop(IntPtr hwnd);
+  [DllImport("user32.dll")] private static extern IntPtr SetActiveWindow(IntPtr hwnd);
+  [DllImport("user32.dll")] private static extern IntPtr SetFocus(IntPtr hwnd);
+  [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint from, uint to, bool attach);
+  [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hwnd);
+  [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
+  [DllImport("user32.dll", EntryPoint="GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
+  [DllImport("user32.dll")] private static extern bool PeekMessage(out Message message, IntPtr hwnd, uint min, uint max, uint remove);
   [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
   [DllImport("user32.dll")] private static extern IntPtr GetSystemMenu(IntPtr hwnd, bool revert);
   [DllImport("user32.dll")] private static extern bool DrawMenuBar(IntPtr hwnd);
@@ -45,6 +56,48 @@ public static class TrayChromeWindow {
     if (owner != ownerId) return false;
     var name = new System.Text.StringBuilder(256); GetClassName(hwnd, name, 256);
     return name.ToString() == "Chrome_WidgetWin_1";
+  }
+  private static bool AppWindow(IntPtr hwnd) {
+    if (!OwnWindow(hwnd)) return false;
+    // Chrome tooltips can use the same class/PID as the app. Never activate them
+    // after restoring the real window, or count them as Messages windows.
+    long style = GetWindowLongPtr(hwnd, -16).ToInt64();
+    long extended = GetWindowLongPtr(hwnd, -20).ToInt64();
+    return (style & 0x00C00000L) == 0x00C00000L && (extended & 0x80L) == 0;
+  }
+  private static bool ForegroundMessages() {
+    var root = GetAncestor(GetForegroundWindow(), 2);
+    return root != IntPtr.Zero && AppWindow(root);
+  }
+  private static void ActivateMessages(IntPtr hwnd) {
+    if (!AppWindow(hwnd)) return;
+    // This runs only on an explicit show command, never on notification arrival.
+    // The helper is a different process from the tray, so Windows may reject its
+    // first foreground request even though the user just clicked the tray icon.
+    SetForegroundWindow(hwnd);
+    if (GetForegroundWindow() == hwnd) return;
+    Message ignored; PeekMessage(out ignored, IntPtr.Zero, 0, 0, 0);
+    uint current = GetCurrentThreadId(), unused;
+    uint foreground = GetWindowThreadProcessId(GetForegroundWindow(), out unused);
+    uint target = GetWindowThreadProcessId(hwnd, out unused);
+    bool attachedForeground = false, attachedTarget = false;
+    try {
+      if (foreground != 0 && foreground != current) attachedForeground = AttachThreadInput(current, foreground, true);
+      if (target != 0 && target != current && target != foreground) attachedTarget = AttachThreadInput(current, target, true);
+      BringWindowToTop(hwnd); SetForegroundWindow(hwnd); SetActiveWindow(hwnd); SetFocus(hwnd);
+      if (GetForegroundWindow() != hwnd) {
+        bool wasTopmost = (GetWindowLongPtr(hwnd, -20).ToInt64() & 8L) != 0;
+        const uint flags = 0x0001 | 0x0002 | 0x0010 | 0x0200;
+        if (!wasTopmost) {
+          try { SetWindowPos(hwnd, new IntPtr(-1), 0, 0, 0, 0, flags); }
+          finally { SetWindowPos(hwnd, new IntPtr(-2), 0, 0, 0, 0, flags); }
+        }
+        BringWindowToTop(hwnd); SetForegroundWindow(hwnd); SetActiveWindow(hwnd); SetFocus(hwnd);
+      }
+    } finally {
+      if (attachedTarget) AttachThreadInput(current, target, false);
+      if (attachedForeground) AttachThreadInput(current, foreground, false);
+    }
   }
   private static int HitTest(IntPtr hwnd, Point point) {
     UIntPtr result;
@@ -81,14 +134,23 @@ public static class TrayChromeWindow {
   }
   private static void Handle(string command) {
     int count = 0, visible = 0; bool closeHandled = false;
+    var windows = new List<IntPtr>();
     EnumWindows(delegate(IntPtr hwnd, IntPtr unused) {
-      if (!OwnWindow(hwnd)) return true;
+      if (AppWindow(hwnd)) windows.Add(hwnd);
+      return true;
+    }, IntPtr.Zero);
+    if (command == "show") {
+      foreach (var hwnd in windows) {
+        GetSystemMenu(hwnd, true); DrawMenuBar(hwnd);
+        ShowWindow(hwnd, IsIconic(hwnd) ? 9 : 5);
+      }
+      // EnumWindows is front-to-back: focus once, not every Chrome-owned tooltip.
+      if (windows.Count > 0) ActivateMessages(windows[0]);
+    }
+    EnumWindows(delegate(IntPtr hwnd, IntPtr unused) {
+      if (!AppWindow(hwnd)) return true;
       count++;
       if (command == "hide") ShowWindow(hwnd, 0);
-      if (command == "show") {
-        GetSystemMenu(hwnd, true); DrawMenuBar(hwnd);
-        ShowWindow(hwnd, 9); SetForegroundWindow(hwnd);
-      }
       if (command == "test-close" && IsWindowVisible(hwnd)) {
         // Probe the native X hit area and run the exact hook callback; no mouse
         // movement/click is injected into the user's desktop during a smoke test.
@@ -115,7 +177,7 @@ public static class TrayChromeWindow {
       if (IsWindowVisible(hwnd)) visible++;
       return true;
     }, IntPtr.Zero);
-    Console.WriteLine("{\"ok\":true,\"count\":" + count + ",\"visible\":" + visible + ",\"closeHandled\":" + (closeHandled ? "true" : "false") + ",\"hookActive\":" + (hook != IntPtr.Zero ? "true" : "false") + "}");
+    Console.WriteLine("{\"ok\":true,\"count\":" + count + ",\"visible\":" + visible + ",\"foreground\":" + (ForegroundMessages() ? "true" : "false") + ",\"topmost\":" + (windows.Exists(hwnd => (GetWindowLongPtr(hwnd, -20).ToInt64() & 8L) != 0) ? "true" : "false") + ",\"closeHandled\":" + (closeHandled ? "true" : "false") + ",\"hookActive\":" + (hook != IntPtr.Zero ? "true" : "false") + "}");
   }
   public static void Run(uint processId) {
     ownerId = processId; SetProcessDpiAwarenessContext(new IntPtr(-4));
@@ -135,4 +197,4 @@ public static class TrayChromeWindow {
   }
 }
 '@
-[TrayChromeWindow]::Run(__OWNER_PID__)
+[TrayChromeWindow]::Run($OwnerPid)
