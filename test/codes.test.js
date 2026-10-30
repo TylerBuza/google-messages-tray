@@ -6,6 +6,7 @@ const { extractCode, MessageGate } = require('../src/codes');
 test('recognizes common numeric verification formats', () => {
   for (const [text, expected] of [
     ['Your Google verification code is 123456.', '123456'],
+    ["G-482917 is your Google verification code. Don't share it with anyone.", '482917'],
     ['123456 is your verification code. Do not share it.', '123456'],
     ['Security code: 4829', '4829'],
     ['Your one-time passcode: 123-456', '123456'],
