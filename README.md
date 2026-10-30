@@ -13,7 +13,7 @@
 
 <p align="center">
   <img src="docs/images/notification-demo.png" width="380" alt="Google Messages Tray popup showing a sample Google sign-in text with G-482917 and a matching Copy 482917 button" />
-  <br /><sub>Google sign-in on your PC → receive the text → copy the code. Sample message; code is fictional.</sub>
+  <br /><sub>Google sign-in on your PC → receive the text → copy the code.</sub>
 </p>
 
 ## Why use it?
