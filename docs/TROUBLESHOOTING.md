@@ -30,6 +30,12 @@ Supported patterns are numeric 4–8 digit codes (including `123 456` / `123-456
 
 Update to v1.0.5 or later. Earlier versions could keep an old unread flag after a conversation disappeared from the loaded list. The badge now uses the current list snapshot rather than a history of unread rows. It does not mark texts read or clear the badge merely because you open the window. In an older version, tray → Reload Messages resets that cached badge state, but save any draft first.
 
+## Amber battery marker
+
+The bottom-left amber battery marker follows Google's own **Phone battery low** warning banner. The red unread indicator remains at top-right and works independently. Pausing notification popups does not pause either status indicator.
+
+This is not a measured Android battery percentage or your PC's battery state. The marker clears when Google removes/hides the warning, when you dismiss it, or when the Messages page becomes unavailable. Dismissing a warning does not charge the phone. Detection currently recognizes the English banner; Google language/layout changes may require compatibility updates.
+
 ## X / minimizing / closing
 
 Mouse-clicking X hides this app's Chrome window. The Hide button and tray Hide command also work. Minimizing is not the same as hiding. Alt+F4/system-menu Close are not intercepted and may close the dedicated browser; double-click the tray icon to reopen it. Use **Quit Messages Tray** to exit cleanly.

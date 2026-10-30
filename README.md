@@ -22,10 +22,17 @@
 - **Copy verification codes.** Detected numeric OTP / 2FA codes get a one-click **Copy** button.
 - **Click X, keep receiving.** The app's close button hides the window instead of shutting down Messages.
 - **Unread tray badge.** A small red dot marks observed unread conversations, even with popups paused. Reading them clears it; simply opening the window does not.
+- **Phone low-battery indicator.** An amber battery marker appears at bottom-left, opposite the red unread dot, while Google's phone-battery warning is visible. Both indicators can appear together; pausing popups does not pause status indicators.
 - **Links use your normal browser.** Web links from messages open through Windows' default browser, outside the dedicated Messages profile. Google's Messages and sign-in pages stay in the app.
 - **Open only when you need it.** Double-click the tray icon to bring Messages to the foreground and read or reply in Google's familiar web interface. Explicitly opening Messages dismisses pending popup previews, without marking conversations read automatically.
 - **Portable Windows app.** No browser extension, administrator access, or installer required. Starting with Windows is optional.
 - **Local companion, open source.** No app analytics, message-forwarding service, or subscription. Google Messages itself still connects to Google.
+
+### Tray indicators at a glance
+
+<img src="docs/images/tray-indicators.png" width="640" alt="Tray icon preview: unread messages show a red top-right dot, low phone battery shows an amber bottom-left battery marker, and both can appear independently together" />
+
+The amber marker follows Google's phone low-battery warning; the red dot remains independent. No battery percentage is guessed.
 
 Built for Android users who work on Windows and are tired of reaching for their phone—or hunting for a browser tab—every time a website sends a sign-in code.
 
@@ -80,6 +87,7 @@ There is no subscription, extension, or app backend. There **is** an Electron + 
 - Locking Windows suppresses companion popups and clears the in-memory last-code shortcut. Suppressed texts are not replayed after unlock. Other site permissions are denied for the Messages origin.
 - Subsequent launches start minimized, then hide; a brief taskbar flash is possible. The tray indicates that the app is running, not that your phone is connected.
 - The unread badge is recalculated from Google's currently loaded conversation list, not a guaranteed account-wide count. Removed rows do not retain old unread flags. Older or unloaded conversations may not be represented until Google loads them. No texts are marked read automatically.
+- The battery marker follows Google's English phone low-battery banner, not direct Android telemetry or the PC battery. It clears when the banner is hidden/dismissed or the Messages page becomes unavailable; dismissing the banner does not mean the phone is charged. No battery percentage is guessed. Google layout or language changes can affect detection.
 - The release is unsigned and currently Windows x64 only. Google sign-in/phone pairing and real incoming SMS require a live user test; automated tests use synthetic messages.
 
 Need help? See [troubleshooting](docs/TROUBLESHOOTING.md) or [report a bug](https://github.com/TylerBuza/google-messages-tray/issues/new/choose). **Never attach real verification codes, texts, pairing QR codes, cookies, or browser profiles.**

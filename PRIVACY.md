@@ -5,6 +5,7 @@ Messages Tray is a local desktop companion, not a messaging provider. Google Mes
 ## What the companion reads and keeps
 
 - It reads notification titles/bodies and, as a fallback, visible unread conversation snippets in its dedicated Google Messages page.
+- It observes Google's own phone low-battery warning banner to show a boolean tray marker. This does not query Android battery telemetry, the PC's battery, or text messages for battery-related phrases. No charge percentage is collected or inferred.
 - Notification contents and detected verification codes are held in memory to display popups and avoid immediate duplicates. There is no message database, message log, analytics, advertising SDK, or app-operated forwarding server.
 - Copying happens only after you click Copy or select the last-code tray shortcut. It does not read or monitor the clipboard. The last-code shortcut expires after five minutes. Popup hover can extend a popup's lifetime.
 - Windows clipboard history and cloud clipboard synchronization are outside this app's control. A copied verification code can remain there after the app exits.

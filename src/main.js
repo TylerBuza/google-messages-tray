@@ -4,7 +4,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { extractCode, MessageGate } = require('./codes');
 const { ChromeHost } = require('./chrome-host');
-const { addUnreadBadge } = require('./tray-badge');
+const { addTrayIndicators } = require('./tray-badge');
 const { choosePopupSlot, detachPopup, stackPopupBounds } = require('./popup-policy');
 
 const HOME = 'https://messages.google.com/web/conversations';
@@ -21,6 +21,7 @@ if (!ownLock) app.quit();
 let host, starting, tray, quitting = false, paused = false, locked = false;
 let lastCode = null;
 let unreadCount = null;
+let phoneBatteryLow = null;
 const trayImages = new Map();
 const smokeExternalLinks = [];
 let smokeFinished = false;
@@ -56,10 +57,10 @@ function receiveMessage(payload) {
 async function startChrome() {
   if (starting) return starting;
   host = new ChromeHost({ profile: path.join(app.getPath('userData'), 'chrome-profile'), url: HOME, offline: smokeTest,
-    onMessage: receiveMessage, onUnread: setUnreadCount,
+    onMessage: receiveMessage, onUnread: setUnreadCount, onPhoneBattery: setPhoneBatteryLow,
     onExternalLink: url => smokeTest ? smokeExternalLinks.push(url) : shell.openExternal(url),
-    onDisconnect: () => { setUnreadCount(null); if (tray) tray.setToolTip('Messages Tray — Chrome closed; double-click to reopen'); },
-    onError: () => { setUnreadCount(null); if (tray) tray.setToolTip('Messages Tray — page failed to load; open Messages to retry'); } });
+    onDisconnect: () => { setUnreadCount(null); setPhoneBatteryLow(null); if (tray) tray.setToolTip('Messages Tray — Chrome closed; double-click to reopen'); },
+    onError: () => { setUnreadCount(null); setPhoneBatteryLow(null); if (tray) tray.setToolTip('Messages Tray — page failed to load; open Messages to retry'); } });
   starting = host.start();
   try { await starting; } finally { starting = null; }
 }
@@ -72,11 +73,12 @@ async function finishSmoke(code, message) {
   fs.writeFileSync(path.join(reportDirectory, 'smoke-report.json'), JSON.stringify({ passed: code === 0, message }));
   quitting = true; await host?.stop(); app.exit(code);
 }
-function makeTrayIcon(unread = false) {
-  if (trayImages.has(unread)) return trayImages.get(unread);
+function makeTrayIcon(unread = unreadCount > 0, lowBattery = phoneBatteryLow === true) {
+  const key = `${Number(unread)}:${Number(lowBattery)}`;
+  if (trayImages.has(key)) return trayImages.get(key);
   const base = nativeImage.createFromPath(path.join(__dirname, '../assets/icon.png')).resize({ width: 32, height: 32 });
-  const image = unread ? nativeImage.createFromBitmap(addUnreadBadge(base.toBitmap(), 32, 32), { width: 32, height: 32 }) : base;
-  trayImages.set(unread, image);
+  const image = unread || lowBattery ? nativeImage.createFromBitmap(addTrayIndicators(base.toBitmap(), 32, 32, { unread, lowBattery }), { width: 32, height: 32 }) : base;
+  trayImages.set(key, image);
   return image;
 }
 function setUnreadCount(count) {
@@ -85,9 +87,15 @@ function setUnreadCount(count) {
   unreadCount = count;
   if (tray && wasUnread !== (count > 0)) { tray.setImage(makeTrayIcon(count > 0)); updateMenu(); }
 }
+function setPhoneBatteryLow(state) {
+  if (state === phoneBatteryLow) return;
+  const wasLow = phoneBatteryLow === true;
+  phoneBatteryLow = state;
+  if (tray && wasLow !== (state === true)) { tray.setImage(makeTrayIcon()); updateMenu(); }
+}
 function updateMenu() {
   if (!tray) return;
-  const status = [unreadCount > 0 ? 'unread messages' : 'running', ...(paused ? ['notifications paused'] : [])];
+  const status = [unreadCount > 0 ? 'unread messages' : 'running', ...(phoneBatteryLow === true ? ['phone battery low'] : []), ...(paused ? ['notifications paused'] : [])];
   tray.setToolTip(`Messages Tray — ${status.join(' · ')}`);
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open Google Messages / pair phone', click: showMessages },
@@ -173,9 +181,19 @@ function showPopup(data) {
           const realChrome = await host.page.evaluate('({webdriver: navigator.webdriver, ua: navigator.userAgent})');
           if (realChrome.webdriver || /Electron/.test(realChrome.ua)) throw new Error('Expected regular Chrome without WebDriver mode');
           if (unreadCount !== 1) throw new Error('Initial unread conversation did not enable the tray badge');
+          if (phoneBatteryLow !== true) throw new Error('Phone battery warning did not enable the amber indicator');
+          await host.page.evaluate(() => document.querySelector('mw-information-banner').remove());
+          await new Promise(resolve => setTimeout(resolve, 450));
+          if (phoneBatteryLow !== false || unreadCount !== 1) throw new Error('Clearing the battery warning changed the unread indicator or failed to clear battery');
+          await host.page.evaluate(() => { document.querySelector('mw-banner').innerHTML = '<mw-information-banner title="Phone battery low"></mw-information-banner>'; });
+          await new Promise(resolve => setTimeout(resolve, 450));
           await host.page.evaluate(() => document.querySelector('[data-e2e-is-unread]').setAttribute('data-e2e-is-unread', 'false'));
           await new Promise(resolve => setTimeout(resolve, 750));
           if (unreadCount !== 0) throw new Error('Marking the conversation read did not clear the tray badge');
+          if (phoneBatteryLow !== true) throw new Error('Clearing unread status removed the independent battery warning');
+          await host.page.evaluate(() => document.querySelector('mw-information-banner').remove());
+          await new Promise(resolve => setTimeout(resolve, 450));
+          if (phoneBatteryLow !== false) throw new Error('Phone battery warning stayed cached after removal');
           await host.page.evaluate(() => document.querySelector('[data-e2e-is-unread]').setAttribute('data-e2e-is-unread', 'true'));
           await new Promise(resolve => setTimeout(resolve, 450));
           if (unreadCount !== 1) throw new Error('Restored unread flag did not enable the tray badge');
@@ -227,7 +245,7 @@ function showPopup(data) {
           if (popups.size !== 0) throw new Error('Explicit open did not dismiss popup previews');
           const finalFocus = await host.status();
           if (!finalFocus.foreground || finalFocus.topmost) throw new Error('Opening Messages with a notification burst did not foreground the app');
-          await finishSmoke(0, 'SMOKE PASS: removed unread rows clear the badge; foreground restore with pending popups; compact 300-message burst, links, and X-to-tray.');
+          await finishSmoke(0, 'SMOKE PASS: independent phone-battery and unread tray indicators clear correctly; foreground restore, compact 300-message burst, links, and X-to-tray.');
         } catch (error) { await finishSmoke(1, 'SMOKE FAIL: ' + error.message); }
       }, 800);
     }

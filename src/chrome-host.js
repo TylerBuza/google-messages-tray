@@ -7,6 +7,7 @@ const readline = require('node:readline');
 const { installNotificationHook } = require('./page-hook');
 const { createWatcher } = require('./watcher');
 const { isCompanionUrl, getExternalUrl, installLinkRouting } = require('./links');
+const { readPhoneBatteryWarning, createPhoneBatteryWatcher } = require('./phone-battery');
 
 function findChrome(env = process.env) {
   const candidates = [env.PROGRAMFILES, env['PROGRAMFILES(X86)'], env.LOCALAPPDATA]
@@ -65,10 +66,12 @@ function installPageCompanion() {
   installNotificationHook();
   const start = () => {
     const watcher = createWatcher(document, notify, count => window.__messagesTrayUnread(count).catch(() => {}));
+    const battery = createPhoneBatteryWatcher(document, state => window.__messagesTrayPhoneBattery(state).catch(() => {}));
+    const scan = () => { watcher.scan(); battery.scan(); };
     let timer;
-    new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(watcher.scan, 350); })
-      .observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'data-is-unread', 'data-e2e-is-unread'] });
-    watcher.scan(); setInterval(watcher.scan, 3000);
+    new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(scan, 350); })
+      .observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'data-is-unread', 'data-e2e-is-unread', 'title', 'content', 'hidden', 'aria-hidden', 'style'] });
+    scan(); setInterval(scan, 3000);
   };
   window.addEventListener('DOMContentLoaded', start, { once: true });
 }
@@ -83,8 +86,8 @@ function installHideButton() {
 }
 
 class ChromeHost {
-  constructor({ profile, url, onMessage, onUnread, onExternalLink, onDisconnect, onError, offline = false }) {
-    Object.assign(this, { profile, url, onMessage, onUnread, onExternalLink, onDisconnect, onError, offline });
+  constructor({ profile, url, onMessage, onUnread, onPhoneBattery, onExternalLink, onDisconnect, onError, offline = false }) {
+    Object.assign(this, { profile, url, onMessage, onUnread, onPhoneBattery, onExternalLink, onDisconnect, onError, offline });
     this.browser = null; this.page = null; this.controller = null; this.stopping = false;
     this.externalRequests = new Map();
     this.routedPages = new WeakSet();
@@ -110,7 +113,7 @@ class ChromeHost {
         this.openExternal(external);
         if (popup) page.close().catch(() => {});
       } else if (this.offline) {
-        request.respond({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Offline smoke test</title><body><a id="external-link" href="https://example.org/messages-tray-click-test" target="_blank">Fictional external link</a><mws-conversations-list><mws-conversation-list-item><a href="/web/conversations/test" data-e2e-is-unread="true"><span class="name">Example</span><span class="snippet-text">Fictional unread text</span></a></mws-conversation-list-item></mws-conversations-list><script>setTimeout(() => new Notification("Smoke test sender", {body:"Your verification code is 123456."}), 1500);</script></body>' }).catch(() => {});
+        request.respond({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Offline smoke test</title><body><mw-banner><mw-information-banner title="Phone battery low" content="Connect phone to a charger"></mw-information-banner></mw-banner><a id="external-link" href="https://example.org/messages-tray-click-test" target="_blank">Fictional external link</a><mws-conversations-list><mws-conversation-list-item><a href="/web/conversations/test" data-e2e-is-unread="true"><span class="name">Example</span><span class="snippet-text">Fictional unread text</span></a></mws-conversation-list-item></mws-conversations-list><script>setTimeout(() => new Notification("Smoke test sender", {body:"Your verification code is 123456."}), 1500);</script></body>' }).catch(() => {});
       } else request.continue().catch(() => {});
     });
     if (popup) {
@@ -139,6 +142,12 @@ class ChromeHost {
     this.browser.on('disconnected', () => { this.controller?.stop(); if (!this.stopping) this.onDisconnect?.(); });
     this.controller = makeWindowController(this.browser.process().pid);
     const pages = await this.browser.pages(); this.page = pages[0] || await this.browser.newPage();
+    this.page.on('framenavigated', frame => {
+      if (frame !== this.page.mainFrame()) return;
+      try {
+        if (new URL(frame.url()).origin !== 'https://messages.google.com') { this.onUnread?.(null); this.onPhoneBattery?.(null); }
+      } catch { this.onUnread?.(null); this.onPhoneBattery?.(null); }
+    });
     await this.browser.defaultBrowserContext().overridePermissions('https://messages.google.com', ['notifications']);
     await this.page.exposeFunction('__messagesTrayNotify', async text => {
       if (this.stopping || typeof text !== 'string' || text.length > 16000) return;
@@ -150,12 +159,17 @@ class ChromeHost {
       if (count !== null && (!Number.isSafeInteger(count) || count < 0 || count > 100000)) return;
       this.onUnread?.(count);
     });
+    await this.page.exposeFunction('__messagesTrayPhoneBattery', async state => {
+      if (this.stopping || new URL(this.page.url()).origin !== 'https://messages.google.com') return;
+      if (state !== null && typeof state !== 'boolean') return;
+      this.onPhoneBattery?.(state);
+    });
     await this.page.exposeFunction('__messagesTrayExternal', value => this.openExternal(value));
     await this.page.exposeFunction('__messagesTrayHide', async () => {
       const origin = new URL(this.page.url()).origin;
       if (['https://messages.google.com', 'https://accounts.google.com'].includes(origin)) await this.hide();
     });
-    await this.page.evaluateOnNewDocument(`(() => { const installNotificationHook = ${installNotificationHook.toString()}; const createWatcher = ${createWatcher.toString()}; (${installPageCompanion.toString()})(); })()`);
+    await this.page.evaluateOnNewDocument(`(() => { const installNotificationHook = ${installNotificationHook.toString()}; const createWatcher = ${createWatcher.toString()}; const readPhoneBatteryWarning = ${readPhoneBatteryWarning.toString()}; const createPhoneBatteryWatcher = ${createPhoneBatteryWatcher.toString()}; (${installPageCompanion.toString()})(); })()`);
     await this.page.evaluateOnNewDocument(`(() => { const isCompanionUrl = ${isCompanionUrl.toString()}; const getExternalUrl = ${getExternalUrl.toString()}; (${installLinkRouting.toString()})(); })()`);
     this.page.on('domcontentloaded', () => this.page.evaluate(installHideButton).catch(() => {}));
     await this.routePage(this.page);

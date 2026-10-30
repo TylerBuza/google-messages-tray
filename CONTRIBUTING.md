@@ -23,6 +23,7 @@ Never commit actual texts, OTPs, Chrome profiles, pairing codes, `.env` files, l
 - `src/watcher.js`: conservative unread-list fallback; initial contents are baselined.
 - `src/codes.js`: numeric verification-code heuristics and short deduplication gate.
 - `src/tray-badge.js`: local bitmap compositing for the unread red-dot tray badge.
+- `src/phone-battery.js`: metadata-only observation of Google's device warning, excluding message/conversation content. Do not substitute the PC's battery API or infer an Android charge percentage.
 - `src/links.js`: safe HTTP(S) URL classification and message-link routing to the Windows default browser.
 - `src/popup-policy.js`: bounded popup admission, hover-safe coalescing, synchronous slot retirement, and variable-height stacking. Never loop waiting for Electron's asynchronous `closed` event.
 - `src/window-helper.ps1`: native Windows window visibility and process-scoped X mouse-click handling.
@@ -45,8 +46,9 @@ Changes to Chrome lifecycle or native window handling also need a manual check: 
 ```powershell
 npm run build
 npm run demo
+npm run demo:tray
 ```
 
-The portable EXE goes to `release/` and is not signed. The committed `assets/icon.ico` and `.png` can be regenerated with `python scripts/generate-icon.py` (optional developer dependency: Pillow). End users and normal builds do not need Python.
+The portable EXE goes to `release/` and is not signed. `demo:tray` renders the real normal/unread/phone-battery/combined icon bitmaps and a compact comparison strip for the README/release notes without reading a profile. The committed `assets/icon.ico` and `.png` can be regenerated with `python scripts/generate-icon.py` (optional developer dependency: Pillow). End users and normal builds do not need Python.
 
 Keep README claims tied to implemented behavior. Avoid promises such as guaranteed notification delivery, zero network access, zero memory cost, or official Google support.
